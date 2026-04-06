@@ -1,3 +1,4 @@
+// 2. 上下文控制层 - 记忆相关
 import { feature } from 'bun:bundle'
 import { join } from 'path'
 import { getFsImplementation } from '../utils/fsOperations.js'
@@ -204,34 +205,34 @@ export function buildMemoryLines(
 ): string[] {
   const howToSave = skipIndex
     ? [
-        '## How to save memories',
-        '',
-        'Write each memory to its own file (e.g., `user_role.md`, `feedback_testing.md`) using this frontmatter format:',
-        '',
-        ...MEMORY_FRONTMATTER_EXAMPLE,
-        '',
-        '- Keep the name, description, and type fields in memory files up-to-date with the content',
-        '- Organize memory semantically by topic, not chronologically',
-        '- Update or remove memories that turn out to be wrong or outdated',
-        '- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.',
-      ]
+      '## How to save memories',
+      '',
+      'Write each memory to its own file (e.g., `user_role.md`, `feedback_testing.md`) using this frontmatter format:',
+      '',
+      ...MEMORY_FRONTMATTER_EXAMPLE,
+      '',
+      '- Keep the name, description, and type fields in memory files up-to-date with the content',
+      '- Organize memory semantically by topic, not chronologically',
+      '- Update or remove memories that turn out to be wrong or outdated',
+      '- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.',
+    ]
     : [
-        '## How to save memories',
-        '',
-        'Saving a memory is a two-step process:',
-        '',
-        '**Step 1** — write the memory to its own file (e.g., `user_role.md`, `feedback_testing.md`) using this frontmatter format:',
-        '',
-        ...MEMORY_FRONTMATTER_EXAMPLE,
-        '',
-        `**Step 2** — add a pointer to that file in \`${ENTRYPOINT_NAME}\`. \`${ENTRYPOINT_NAME}\` is an index, not a memory — each entry should be one line, under ~150 characters: \`- [Title](file.md) — one-line hook\`. It has no frontmatter. Never write memory content directly into \`${ENTRYPOINT_NAME}\`.`,
-        '',
-        `- \`${ENTRYPOINT_NAME}\` is always loaded into your conversation context — lines after ${MAX_ENTRYPOINT_LINES} will be truncated, so keep the index concise`,
-        '- Keep the name, description, and type fields in memory files up-to-date with the content',
-        '- Organize memory semantically by topic, not chronologically',
-        '- Update or remove memories that turn out to be wrong or outdated',
-        '- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.',
-      ]
+      '## How to save memories',
+      '',
+      'Saving a memory is a two-step process:',
+      '',
+      '**Step 1** — write the memory to its own file (e.g., `user_role.md`, `feedback_testing.md`) using this frontmatter format:',
+      '',
+      ...MEMORY_FRONTMATTER_EXAMPLE,
+      '',
+      `**Step 2** — add a pointer to that file in \`${ENTRYPOINT_NAME}\`. \`${ENTRYPOINT_NAME}\` is an index, not a memory — each entry should be one line, under ~150 characters: \`- [Title](file.md) — one-line hook\`. It has no frontmatter. Never write memory content directly into \`${ENTRYPOINT_NAME}\`.`,
+      '',
+      `- \`${ENTRYPOINT_NAME}\` is always loaded into your conversation context — lines after ${MAX_ENTRYPOINT_LINES} will be truncated, so keep the index concise`,
+      '- Keep the name, description, and type fields in memory files up-to-date with the content',
+      '- Organize memory semantically by topic, not chronologically',
+      '- Update or remove memories that turn out to be wrong or outdated',
+      '- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.',
+    ]
 
   const lines: string[] = [
     `# ${displayName}`,
@@ -359,10 +360,10 @@ function buildAssistantDailyLogPrompt(skipIndex = false): string {
     ...(skipIndex
       ? []
       : [
-          `## ${ENTRYPOINT_NAME}`,
-          `\`${ENTRYPOINT_NAME}\` is the distilled index (maintained nightly from your logs) and is loaded into your context automatically. Read it for orientation, but do not edit it directly — record new information in today's log instead.`,
-          '',
-        ]),
+        `## ${ENTRYPOINT_NAME}`,
+        `\`${ENTRYPOINT_NAME}\` is the distilled index (maintained nightly from your logs) and is loaded into your context automatically. Read it for orientation, but do not edit it directly — record new information in today's log instead.`,
+        '',
+      ]),
     ...buildSearchingPastContextSection(memoryDir),
   ]
 

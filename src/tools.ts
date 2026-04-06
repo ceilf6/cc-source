@@ -1,3 +1,4 @@
+// 3. 模型能力层
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { toolMatchesName, type Tool, type Tools } from './Tool.js'
 import { AgentTool } from './tools/AgentTool/AgentTool.js'
@@ -20,7 +21,7 @@ const REPLTool =
 const SuggestBackgroundPRTool =
   process.env.USER_TYPE === 'ant'
     ? require('./tools/SuggestBackgroundPRTool/SuggestBackgroundPRTool.js')
-        .SuggestBackgroundPRTool
+      .SuggestBackgroundPRTool
     : null
 const SleepTool =
   feature('PROACTIVE') || feature('KAIROS')
@@ -28,10 +29,10 @@ const SleepTool =
     : null
 const cronTools = feature('AGENT_TRIGGERS')
   ? [
-      require('./tools/ScheduleCronTool/CronCreateTool.js').CronCreateTool,
-      require('./tools/ScheduleCronTool/CronDeleteTool.js').CronDeleteTool,
-      require('./tools/ScheduleCronTool/CronListTool.js').CronListTool,
-    ]
+    require('./tools/ScheduleCronTool/CronCreateTool.js').CronCreateTool,
+    require('./tools/ScheduleCronTool/CronDeleteTool.js').CronDeleteTool,
+    require('./tools/ScheduleCronTool/CronListTool.js').CronListTool,
+  ]
   : []
 const RemoteTriggerTool = feature('AGENT_TRIGGERS_REMOTE')
   ? require('./tools/RemoteTriggerTool/RemoteTriggerTool.js').RemoteTriggerTool
@@ -45,7 +46,7 @@ const SendUserFileTool = feature('KAIROS')
 const PushNotificationTool =
   feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION')
     ? require('./tools/PushNotificationTool/PushNotificationTool.js')
-        .PushNotificationTool
+      .PushNotificationTool
     : null
 const SubscribePRTool = feature('KAIROS_GITHUB_WEBHOOKS')
   ? require('./tools/SubscribePRTool/SubscribePRTool.js').SubscribePRTool
@@ -91,7 +92,7 @@ import { isTodoV2Enabled } from './utils/tasks.js'
 const VerifyPlanExecutionTool =
   process.env.CLAUDE_CODE_VERIFY_PLAN === 'true'
     ? require('./tools/VerifyPlanExecutionTool/VerifyPlanExecutionTool.js')
-        .VerifyPlanExecutionTool
+      .VerifyPlanExecutionTool
     : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from './tools/SyntheticOutputTool/SyntheticOutputTool.js'
@@ -112,7 +113,7 @@ const CtxInspectTool = feature('CONTEXT_COLLAPSE')
   : null
 const TerminalCaptureTool = feature('TERMINAL_PANEL')
   ? require('./tools/TerminalCaptureTool/TerminalCaptureTool.js')
-      .TerminalCaptureTool
+    .TerminalCaptureTool
   : null
 const WebBrowserTool = feature('WEB_BROWSER_TOOL')
   ? require('./tools/WebBrowserTool/WebBrowserTool.js').WebBrowserTool
@@ -128,9 +129,9 @@ const ListPeersTool = feature('UDS_INBOX')
   : null
 const WorkflowTool = feature('WORKFLOW_SCRIPTS')
   ? (() => {
-      require('./tools/WorkflowTool/bundled/index.js').initBundledWorkflows()
-      return require('./tools/WorkflowTool/WorkflowTool.js').WorkflowTool
-    })()
+    require('./tools/WorkflowTool/bundled/index.js').initBundledWorkflows()
+    return require('./tools/WorkflowTool/WorkflowTool.js').WorkflowTool
+  })()
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import type { ToolPermissionContext } from './Tool.js'

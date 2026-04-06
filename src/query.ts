@@ -1,3 +1,4 @@
+// 1. 调用层
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import type {
   ToolResultBlockParam,
@@ -346,13 +347,13 @@ async function* queryLoop(
     // Initialize or increment query chain tracking
     const queryTracking = toolUseContext.queryTracking
       ? {
-          chainId: toolUseContext.queryTracking.chainId,
-          depth: toolUseContext.queryTracking.depth + 1,
-        }
+        chainId: toolUseContext.queryTracking.chainId,
+        depth: toolUseContext.queryTracking.depth + 1,
+      }
       : {
-          chainId: deps.uuid(),
-          depth: 0,
-        }
+        chainId: deps.uuid(),
+        depth: 0,
+      }
 
     const queryChainIdForAnalytics =
       queryTracking.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
@@ -381,10 +382,10 @@ async function* queryLoop(
       toolUseContext.contentReplacementState,
       persistReplacements
         ? records =>
-            void recordContentReplacement(
-              records,
-              toolUseContext.agentId,
-            ).catch(logError)
+          void recordContentReplacement(
+            records,
+            toolUseContext.agentId,
+          ).catch(logError)
         : undefined,
       new Set(
         toolUseContext.options.tools
@@ -492,9 +493,9 @@ async function* queryLoop(
           compactionUsage?.cache_creation_input_tokens ?? 0,
         compactionTotalTokens: compactionUsage
           ? compactionUsage.input_tokens +
-            (compactionUsage.cache_creation_input_tokens ?? 0) +
-            (compactionUsage.cache_read_input_tokens ?? 0) +
-            compactionUsage.output_tokens
+          (compactionUsage.cache_creation_input_tokens ?? 0) +
+          (compactionUsage.cache_read_input_tokens ?? 0) +
+          compactionUsage.output_tokens
           : 0,
 
         queryChainId: queryChainIdForAnalytics,
@@ -561,10 +562,10 @@ async function* queryLoop(
     const useStreamingToolExecution = config.gates.streamingToolExecution
     let streamingToolExecutor = useStreamingToolExecution
       ? new StreamingToolExecutor(
-          toolUseContext.options.tools,
-          canUseTool,
-          toolUseContext,
-        )
+        toolUseContext.options.tools,
+        canUseTool,
+        toolUseContext,
+      )
       : null
 
     const appState = toolUseContext.getAppState()
@@ -874,7 +875,7 @@ async function* queryLoop(
             const usage = lastAssistant?.message.usage
             const cumulativeDeleted = usage
               ? ((usage as unknown as Record<string, number>)
-                  .cache_deleted_input_tokens ?? 0)
+                .cache_deleted_input_tokens ?? 0)
               : 0
             const deletedTokens = Math.max(
               0,
@@ -1141,7 +1142,7 @@ async function* queryLoop(
             taskBudgetRemaining = Math.max(
               0,
               (taskBudgetRemaining ?? params.taskBudget.total) -
-                preCompactContext,
+              preCompactContext,
             )
           }
 
@@ -1449,11 +1450,11 @@ async function* queryLoop(
         )
         const resultContent =
           toolResult?.type === 'user' &&
-          Array.isArray(toolResult.message.content)
+            Array.isArray(toolResult.message.content)
             ? toolResult.message.content.find(
-                (c): c is ToolResultBlockParam =>
-                  c.type === 'tool_result' && c.tool_use_id === block.id,
-              )
+              (c): c is ToolResultBlockParam =>
+                c.type === 'tool_result' && c.tool_use_id === block.id,
+            )
             : undefined
         return {
           name: block.name,

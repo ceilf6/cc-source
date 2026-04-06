@@ -1,3 +1,4 @@
+// 3. 模型能力层
 import { randomBytes } from 'crypto'
 import type { AppState } from './state/AppState.js'
 import type { AgentId } from './types/ids.js'

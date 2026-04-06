@@ -1,3 +1,4 @@
+// 1. 调用层
 import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { randomUUID } from 'crypto'
@@ -113,8 +114,8 @@ const getCoordinatorUserContext: (
   mcpClients: ReadonlyArray<{ name: string }>,
   scratchpadDir?: string,
 ) => { [k: string]: string } = feature('COORDINATOR_MODE')
-  ? require('./coordinator/coordinatorMode.js').getCoordinatorUserContext
-  : () => ({})
+    ? require('./coordinator/coordinatorMode.js').getCoordinatorUserContext
+    : () => ({})
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 // Dead code elimination: conditional import for snip compaction
@@ -344,7 +345,7 @@ export class QueryEngine {
       setMessages: fn => {
         this.mutableMessages = fn(this.mutableMessages)
       },
-      onChangeAPIKey: () => {},
+      onChangeAPIKey: () => { },
       handleElicitation: this.config.handleElicitation,
       options: {
         commands,
@@ -371,8 +372,8 @@ export class QueryEngine {
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
       dynamicSkillDirTriggers: new Set<string>(),
       discoveredSkillNames: this.discoveredSkillNames,
-      setInProgressToolUseIDs: () => {},
-      setResponseLength: () => {},
+      setInProgressToolUseIDs: () => { },
+      setResponseLength: () => { },
       updateFileHistoryState: (
         updater: (prev: FileHistoryState) => FileHistoryState,
       ) => {
@@ -416,7 +417,7 @@ export class QueryEngine {
     } = await processUserInput({
       input: prompt,
       mode: 'prompt',
-      setToolJSX: () => {},
+      setToolJSX: () => { },
       context: {
         ...processUserInputContext,
         messages: this.mutableMessages,
@@ -491,8 +492,8 @@ export class QueryEngine {
     // model (from slash commands).
     processUserInputContext = {
       messages,
-      setMessages: () => {},
-      onChangeAPIKey: () => {},
+      setMessages: () => { },
+      onChangeAPIKey: () => { },
       handleElicitation: this.config.handleElicitation,
       options: {
         commands,
@@ -519,8 +520,8 @@ export class QueryEngine {
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
       dynamicSkillDirTriggers: new Set<string>(),
       discoveredSkillNames: this.discoveredSkillNames,
-      setInProgressToolUseIDs: () => {},
-      setResponseLength: () => {},
+      setInProgressToolUseIDs: () => { },
+      setResponseLength: () => { },
       updateFileHistoryState: processUserInputContext.updateFileHistoryState,
       updateAttributionState: processUserInputContext.updateAttributionState,
       setSDKStatus,
@@ -1275,12 +1276,12 @@ export async function* ask({
     orphanedPermission,
     ...(feature('HISTORY_SNIP')
       ? {
-          snipReplay: (yielded: Message, store: Message[]) => {
-            if (!snipProjection!.isSnipBoundaryMessage(yielded))
-              return undefined
-            return snipModule!.snipCompactIfNeeded(store, { force: true })
-          },
-        }
+        snipReplay: (yielded: Message, store: Message[]) => {
+          if (!snipProjection!.isSnipBoundaryMessage(yielded))
+            return undefined
+          return snipModule!.snipCompactIfNeeded(store, { force: true })
+        },
+      }
       : {}),
   })
 

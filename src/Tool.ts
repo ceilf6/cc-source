@@ -1,3 +1,4 @@
+// 3. 模型能力层
 import type {
   ToolResultBlockParam,
   ToolUseBlockParam,
@@ -95,10 +96,10 @@ export type QueryChainTracking = {
 export type ValidationResult =
   | { result: true }
   | {
-      result: false
-      message: string
-      errorCode: number
-    }
+    result: false
+    message: string
+    errorCode: number
+  }
 
 export type SetToolJSXFn = (
   args: {
@@ -149,9 +150,9 @@ export const getEmptyToolPermissionContext: () => ToolPermissionContext =
 
 export type CompactProgressEvent =
   | {
-      type: 'hooks_start'
-      hookType: 'pre_compact' | 'post_compact' | 'session_start'
-    }
+    type: 'hooks_start'
+    hookType: 'pre_compact' | 'post_compact' | 'session_start'
+  }
   | { type: 'compact_start' }
   | { type: 'compact_end' }
 
@@ -734,10 +735,10 @@ export type ToolDef<
  */
 type BuiltTool<D> = Omit<D, DefaultableToolKeys> & {
   [K in DefaultableToolKeys]-?: K extends keyof D
-    ? undefined extends D[K]
-      ? ToolDefaults[K]
-      : D[K]
-    : ToolDefaults[K]
+  ? undefined extends D[K]
+  ? ToolDefaults[K]
+  : D[K]
+  : ToolDefaults[K]
 }
 
 /**
