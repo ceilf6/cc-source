@@ -194,3 +194,428 @@ let snapshot: readonly QueuedCommand[] = Object.freeze([])
 const queueChanged = createSignal()
 ```
 其中 commandQueue 是真实可变数据，**snapshot** 是提供给 **React** 的只读快照，queueChanged 负责在队列变化时通知订阅者。React 侧通过 useSyncExternalStore(subscribe, getSnapshot) 订阅它；而非 React 代码则可以直接调用 enqueue、dequeue、peek 等同步 API 读写这份模块级状态。
+
+## 四. 安全
+
+上面在讲交互、状态、工具时，其实已经不断碰到 cc 的一个核心前提：
+它不是像很多“托管沙箱式”AI 编程产品那样，先在隔离环境里生成代码、再由人把结果合并回本地；Claude Code 是直接拿到你的终端、当前工作目录、配置文件、MCP、插件和会话上下文去行动。
+
+这带来了一个很重要的设计变化：
+它的安全体系重点，不是“把模型关进完全隔离的盒子里”，而是“在真实环境里，让每一次动作都经过足够细粒度、可回退、可审计、可灰度的权限决策”。
+
+所以如果要学习 claude code 的安全设计，我觉得不应该再把它理解成一个“六层串行验证器”，而应该理解成下面三条主线：
+1. - **权限决策管线**：一个工具调用从提出请求到被允许/拒绝，中间经过哪些检查、哪些检查可以提前返回
+2. - **模式状态机**：不同 permission mode 如何改变同一条命令的处理方式，以及模式切换时上下文如何同步变化
+3. - **审批通道编排**：用户的批准并不只来自本地终端弹窗，而是来自本地 UI、远端 bridge、channel relay、hook、异步 classifier 等多个并发通道
+
+为了避免把“设计”和“猜测”混在一起，这里我主要依据这些文件来理解：
+- `src/utils/permissions/permissions.ts`
+- `src/tools/BashTool/bashPermissions.ts`
+- `src/utils/bash/ast.ts`
+- `src/tools/BashTool/bashSecurity.ts`
+- `src/hooks/toolPermission/handlers/interactiveHandler.ts`
+- `src/utils/permissions/permissionSetup.ts`
+
+### 1. 先从威胁模型看：cc 到底在防什么
+
+如果只是把这套系统理解成“危险命令要二次确认”，其实会低估很多设计细节。cc 实际上在同时防下面几类风险：
+1. - **命令注入 / parser differential**：模型输出的 shell 字符串，看起来像一个命令，但 shell 真正执行时可能不是你肉眼看到的那样
+2. - **规则绕过**：用户自己配置的 allow 规则如果过宽，可能会把 classifier 整个架空
+3. - **危险路径写入**：像 `.git/`、`.claude/`、shell config、关键系统目录，不能因为“当前是 bypass/auto 模式”就直接放行
+4. - **组合命令上下文风险**：单条子命令看起来安全，但放进 `cd && git`、pipe、redirect、compound command 里之后，风险含义会变化
+5. - **子代理失控**：Agent 工具如果被过宽授权，会绕过上层对 delegation 的安全约束
+6. - **远程审批竞态**：本地终端、远端 UI、消息通道、异步 classifier 都可能对同一个 permission request 作出响应
+7. - **headless 场景失控**：无头代理没法弹窗时，如果没有 fail-closed 兜底，就会出现“无法询问用户但仍继续执行”的风险
+
+也就是说它防的不只是“rm -rf /”这种直观危险，更是在防“安全策略本身被架空”。
+
+### 2. 主体不是六层串行，而是一条可提前返回的决策管线
+
+如果按源码去看，`hasPermissionsToUseTool(...)` 和 `bashToolHasPermission(...)` 这两条路径的核心特征不是“每一层都一定执行”，而是：
+**很多检查都可以提前结束流程**。
+
+```mermaid
+flowchart TD
+    A[Tool Use Request] --> B[Rule-Based Gate]
+    B --> C[Tool-Specific Permission Check]
+    C --> D[Mode Transform]
+    D --> E[Automated Adjudication]
+    E --> F[Human Approval Channels]
+    F --> G[Execute or Deny]
+
+    B -->|deny / ask / allow| G
+    C -->|deny / safetyCheck| G
+    D -->|acceptEdits / bypass / dontAsk / auto| G
+    E -->|classifier / hook gives result| G
+```
+
+所以更准确的说法不是“六层线性防御”，而是：
+它是一个 **DAG 式权限决策系统**，包含若干个可能提前返回的 gate。
+
+#### 2.1 规则系统不是简单 allow/deny，而是带 provenance 的策略系统
+
+在 `permissions.ts` 和 `types/permissions.ts` 里，权限规则并不是一个单纯的布尔表，而是带来源的：
+- `userSettings`
+- `projectSettings`
+- `localSettings`
+- `policySettings`
+- `flagSettings`
+- `cliArg`
+- `session`
+- `command`
+
+这背后很值得学的一点是：
+**安全决策不仅要知道“命中了什么规则”，还要知道“这个规则从哪来”**。
+
+因为规则来源不同，后续行为也不同：
+1. - 有的规则可以持久化编辑
+2. - 有的规则是 policy 下发，不能随便删
+3. - 有的规则只在 session 内临时生效
+4. - 有的规则来自 CLI 参数，只应该影响当前进程
+
+这比“allowlist / denylist”要更像一个带 provenance 的策略系统。
+
+另外，shell 规则匹配也不应写成“支持正则”。
+对用户可见的形态，更准确的是三种：
+1. - exact：精确命令
+2. - prefix：`npm run:*` 这种前缀规则
+3. - wildcard：带 `*` 的通配规则
+
+内部会编译成 regex 去匹配，但**用户面对的抽象不是正则系统**。
+
+#### 2.2 tool-specific permission check 才是真正体现“工具语义”的地方
+
+外层规则系统只知道“这个工具/这个命令大概该不该放行”，
+真正理解工具语义的，是工具自己的 `checkPermissions(...)`。
+
+其中最复杂的是 Bash：
+- 它不只是判断“是不是 Bash”
+- 还会继续分析 subcommand、operator、redirection、path、sandbox、compound command
+
+也就是说，cc 的权限系统不是单层 policy engine，而是：
+**通用规则层 + 工具内语义层** 的组合。
+
+#### 2.3 mode 不是 UI 标签，而是权限语义转换器
+
+`PermissionMode` 在这里不是“界面模式”，而是真实改变决策逻辑的状态机：
+- `default`
+- `plan`
+- `acceptEdits`
+- `dontAsk`
+- `bypassPermissions`
+- `auto`
+
+例如：
+1. - `dontAsk` 会把原本的 `ask` 转成 `deny`
+2. - `acceptEdits` 会对一部分文件系统命令直接走 fast-path
+3. - `bypassPermissions` 虽然很强，但仍然不能覆盖某些 `safetyCheck`
+4. - `auto` 会调用 transcript classifier，不再只是弹窗等用户
+
+这点很值得学习：
+**模式切换不是切 UI，而是切权限语义**。
+
+#### 2.4 `safetyCheck` 是 bypass-immune 的硬防线
+
+源码里有一个非常关键的术语：`safetyCheck`。
+
+它代表的是某些风险即使在宽松模式下也不能直接绕过，例如：
+- `.git/`
+- `.claude/`
+- shell config
+- 危险删除路径
+
+在 `permissions.ts` 里，这类结果会被单独拎出来处理；即使在 bypass 路径里，也不会像普通 allow/ask 那样被一把跳过。
+
+这说明 cc 的设计不是“有一个超级管理员模式，万物直通”，而是：
+**有些风险属于系统级硬边界，模式只能影响大多数流程，不能抹掉全部边界**。
+
+这个设计我觉得非常成熟，因为它防的是“你为了方便，把整个系统的牙都拔掉”。
+
+### 3. Bash 是最大的安全面，所以用了双轨分析
+
+如果要从源码里挑一个最值得学习的安全面，我觉得就是 Bash。
+因为 BashTool 其实是整个系统里最接近“把宿主机直接交给模型”的能力。
+
+#### 3.1 AST 路径的重点不是“解析语法树”，而是“能否可信提取 argv”
+
+在 `src/utils/bash/ast.ts` 里，注释写得很清楚：
+它的目标不是构建一个 shell sandbox，而是回答一个更窄但更关键的问题：
+**我们能不能可信地为这条命令提取出 simple command 的 argv[]？**
+
+这背后的思想很漂亮：
+1. - 如果能可信提取，后面就可以做更强的 prefix / path / subcommand / redirect 安全分析
+2. - 如果不能可信提取，就不要自作聪明，直接走 `too-complex -> ask`
+
+所以这条 AST 路径真正的关键词是：
+- allowlist
+- fail-closed
+- trustworthy argv extraction
+
+不是“树更高级”，而是“只有在结构可证明可信时才自动化决策”。
+
+#### 3.2 它不是只靠 AST，而是 AST 优先 + legacy validator 兼容兜底
+
+你原来把这一层写成“注入检测层，30+攻击特征匹配”，这个说法只说对了一半。
+
+更准确的说法是：
+cc 在 Bash 安全上走的是 **双轨安全分析**：
+1. - **AST 路径优先**：优先用 tree-sitter 风格的结构化分析，判断命令是否属于“可可信分析”的简单结构
+2. - **legacy validator 兜底**：如果 AST 不可用、shadow mode 下不生效、或者命令需要兼容旧路径，就继续使用 `bashSecurity.ts` 里的 regex / shell quote / pattern battery
+
+也就是说，旧逻辑并没有被简单删除，而是变成兼容兜底层。
+
+这很值得学，因为很多系统在“新安全模型上线”时容易犯的错是：
+一刀切替换旧逻辑，结果出现灰度期盲点。
+
+而 cc 的做法更像：
+**先让新路径成为主判断，再用 shadow mode 和 legacy fallback 保持迁移安全性**。
+
+#### 3.3 它防的不只是“危险命令”，还防“拆分分析带来的认知偏差”
+
+这里有两个很能说明问题的例子。
+
+第一个例子是：
+```bash
+echo hi | xargs printf '%s' >> file
+```
+
+如果你只是把 pipe 两边拆开看，会觉得：
+1. - `echo hi` 很安全
+2. - `xargs printf '%s'` 也不算特别危险
+
+但真正危险的信息在原始命令的 `>> file` 上。
+所以 `bashPermissions.ts` 里会在 operator/subcommand 分析之后，再回头检查原始命令的 redirection 和 path constraint。
+
+这点特别值得学：
+**局部子命令安全，不等于整体命令安全**。
+
+第二个例子是：
+```bash
+cd malicious && git status
+```
+
+单看 `git status` 是个近乎只读命令，但放进 `cd ... && git ...` 的上下文里，它可能进入一个恶意仓库目录，从而触发额外风险。
+
+所以这里真正被防的不是“git status 危险”，而是：
+**组合命令上下文改变了原本工具语义**。
+
+也就是说 cc 的设计不是只看 token，而是在努力恢复“执行时语义”。
+
+### 4. 沙盒不是简单白名单，而是一个 shortcut
+
+你原来的“沙盒自动允许层”可以保留，但要换一种解释方式。
+
+更准确的说法是：
+**沙盒并不是把系统变安全的唯一边界，而是在确认命令会进入 sandbox 的前提下，为一部分命令提供 shortcut**。
+
+这背后有两个细节非常重要。
+
+#### 4.1 auto-allow with sandbox 的前提是“真的会进 sandbox”
+
+`shouldUseSandbox(...)` 不是一个装饰性的判断，它决定了后续能不能走 sandbox auto-allow 快路径。
+
+如果命令：
+1. - 显式要求禁用 sandbox
+2. - 命中 excluded command
+3. - 当前环境根本没启用 sandbox
+
+那它就不会进入这个 shortcut，而会继续走正常权限决策。
+
+所以“在沙盒里就自动允许”的准确语义应该是：
+**在已经确认该命令会被沙盒约束时，可以减少一次用户确认**。
+
+#### 4.2 `excludedCommands` 在源码里明确不是安全边界
+
+这点很值得单独写出来。
+
+在 `shouldUseSandbox.ts` 里有一句注释非常直白：
+`excludedCommands is a user-facing convenience feature, not a security boundary.`
+
+这说明作者对安全边界画得很清楚：
+1. - 真正的安全边界是 sandbox permission system
+2. - `excludedCommands` 只是配置便捷项，不应该被误解为安全机制本身
+
+这其实是很多系统设计里容易被忽视的点：
+**方便用户的开关，不等于真正的安全边界**。
+
+### 5. “AI 分类器”其实有两类，而且源码能证实的内容要谨慎说
+
+这部分尤其值得修正，因为最容易把“产品叙述”“猜测”“当前源码”混成一团。
+
+#### 5.1 Bash prompt classifier 更像命令级 allow/ask/deny 判断
+
+在 Bash 这边，classifier 主要是围绕命令级匹配在工作的：
+- allow descriptions
+- ask descriptions
+- deny descriptions
+
+它更像是在说：
+“这条 Bash 命令是否符合某一类可描述的允许/询问/拒绝模式”
+
+也就是说它更像一个 **命令级审批器**，而不是一个抽象的全局风险分引擎。
+
+#### 5.2 auto-mode transcript classifier 更像动作审裁器
+
+`yoloClassifier.ts` 这一路则更像是在回答另一个问题：
+**结合当前对话、工具动作、上下文，auto mode 下这一步动作是否应该被放行？**
+
+所以这边更像一个：
+**动作级 adjudicator**
+
+它的输出心智模型也更接近：
+- allow
+- block
+- unavailable
+
+而不是你原文里写的那种固定“0-1 风险分 + 阈值表”。
+
+#### 5.3 当前仓库里，能直接证实的和不能直接证实的要分开写
+
+这点非常重要。
+
+当前仓库里的 `src/utils/permissions/bashClassifier.ts` 是 external stub，所以像下面这些说法，如果要写进学习笔记，就要非常谨慎：
+- “输出 0-1 风险分”
+- “阈值 0.95 / 0.5”
+- “100万+历史命令训练数据”
+
+这些并不是当前这份源码能直接证实的事实。
+
+如果写成笔记，更稳妥的写法应该是：
+1. - 源码能够证实：存在 classifier 接口、存在 allow/ask/deny 的分类式调用点、存在 auto-mode classifier
+2. - 源码不能直接证实：具体打分形式、训练集规模、固定阈值表
+
+这其实也是一个很值得学习的方法论：
+**做源码学习时，要区分“我看到的实现”与“我推测的产品内部细节”**。
+
+### 6. mode 状态机最值得学的不是枚举值，而是“切换时发生了什么”
+
+如果只是列一个 mode 表：
+- default
+- plan
+- acceptEdits
+- dontAsk
+- bypassPermissions
+- auto
+
+其实还没抓到重点。
+
+真正值得学的是：
+**mode transition 不只是换个状态值，而是会触发上下文变换**。
+
+#### 6.1 auto mode 不是简单开关，而是会“自净化”权限上下文
+
+在 `permissionSetup.ts` 里，一个非常漂亮的设计是：
+当进入 auto mode 时，系统会主动剥离那些会绕过 classifier 的危险 allow 规则，例如：
+- `Bash(*)`
+- `Bash(python:*)`
+- `Agent(*)`
+
+等离开 auto mode 再恢复。
+
+也就是说，cc 不是天真地说：
+“你已经开了 auto，那就直接拿现有规则继续跑”
+
+而是进一步意识到：
+**有些用户自己配置的 allow 规则，会把 auto mode 最核心的 classifier 直接架空**
+
+所以进入 auto mode 时，先清洗一遍权限上下文。
+
+这个设计非常值得学，因为它体现了：
+**系统不仅防模型，也防“过去为了方便留下的过宽策略”**。
+
+#### 6.2 bypass 也不是“上帝模式”
+
+另一个很值得强调的点是：
+很多人看到 `bypassPermissions` 会直觉地认为它等于“跳过全部检查”。
+
+但从源码看并不是这样。
+
+像前面提到的 `safetyCheck`，就是 bypass-immune 的。
+这意味着：
+**bypass 是对大多数 permission prompt 的跳过，不是对所有安全边界的删除**。
+
+这类设计的好处是：
+哪怕给了高级用户更强控制权，系统仍然给自己保留了一层“最后的牙”。
+
+### 7. 审批不是一个弹窗，而是一组并发竞争的通道
+
+如果只看表面 UI，很容易把 cc 的权限确认理解为：
+“弹出一个 dialog，用户点 yes/no”
+
+但在 `interactiveHandler.ts` 里，整个审批过程更像一个并发编排系统。
+
+它至少有这些响应来源：
+1. - 本地终端 UI
+2. - CCR remote bridge
+3. - channel relay
+4. - PermissionRequest hooks
+5. - 异步 Bash allow classifier
+
+这些通道之间不是串行排队，而是 **race**：
+谁先给出有效决策，谁就赢。
+
+这个设计我觉得特别像一个现实系统，而不是“理想化的单线程审批器”。
+
+因为在真实产品里，用户可能：
+1. - 在本地点了允许
+2. - 同时远端网页也点了允许
+3. - 或者 classifier 在用户操作前就自动批准了
+
+所以系统必须解决的是：
+**多个审批来源对同一个请求的竞态一致性**。
+
+这已经不是“权限弹窗 UI”层面的设计了，而是一个小型并发协调问题。
+
+### 8. headless agent 的安全处理特别值得看
+
+很多工具在交互模式下做得还行，一到 headless / background / subagent 就开始偷懒：
+既然没法问用户，那就“默认继续”或者“随便失败”。
+
+cc 在这块的处理反而很有代表性。
+
+它的思路大致是：
+1. - 如果当前上下文不能弹出 permission prompt
+2. - 那就先跑 `PermissionRequest` hooks，看有没有自动 allow/deny
+3. - 如果 hooks 也没给结论，就直接 fail-closed
+
+也就是说它在 headless 场景下选择的是：
+**先尝试自动化政策判断，如果还不够确定，就拒绝，不赌运气**。
+
+这点特别能说明 cc 的安全观：
+它不是“尽量让 agent 跑下去”，而是“尽量在不越线的前提下让 agent 跑下去”。
+
+### 9. 这不是静态规则系统，而是一个可运营的安全系统
+
+我觉得 claude code 在安全方面最让我觉得成熟的一点，不是规则写得多，而是它明显在按“可运营系统”的思路做安全。
+
+比如源码里能看到很多这类设计：
+1. - **shadow parse**：先观测新 AST 路径和旧路径是否分歧，而不是一上来全量切
+2. - **feature gate / killswitch**：发现问题能快速关掉
+3. - **denial tracking**：auto mode 下连续拒绝过多，会转回 prompting，而不是一直盲拒
+4. - **classifier dump / telemetry**：classifier 失败时可以保留上下文做排查
+5. - **fail-open 与 fail-closed 的区分**：有些情况回退到人工审批，有些情况直接拒绝
+
+这背后体现的其实是：
+**安全不是靠一组永远正确的静态规则，而是靠一套可以灰度、观察、回滚、修正的演进机制**。
+
+对于工程系统来说，我觉得这比“列出很多危险模式”更值得学。
+
+### 10. 如果把这一节浓缩成几个最值得学的设计点
+
+最后如果让我把这一节再浓缩成几个可以复用到自己系统里的知识点，我会记下面这几条：
+
+1. - **把“能否可信分析”与“是否允许执行”拆开**
+   `ast.ts` 先判断能不能可信提取 argv，不能就 fail-closed，这比直接在不可靠字符串上硬做规则匹配稳得多。
+2. - **权限规则一定要带来源**
+   不然你只知道“命中了规则”，却不知道这个规则该不该删、能不能持久化、是不是 policy 下发的。
+3. - **模式切换要联动上下文变换**
+   进入 auto mode 时主动剥离会绕过 classifier 的规则，这种“模式切换伴随策略自净化”的设计非常高级。
+4. - **局部安全不等于整体安全**
+   pipe、redirect、compound command、`cd && git` 这些都说明：子命令安全，不代表整条命令安全。
+5. - **审批系统本质上是并发协调系统**
+   本地、远端、channel、hook、classifier 可能同时返回结果，真正难的是保证只有一个结果生效。
+6. - **真正成熟的安全系统必须可运营**
+   有 shadow、有 gate、有 killswitch、有 telemetry、有 fallback，才能在真实产品里长期演进。
+
+如果说前面几章更多是在看 claude code 如何做“交互式 agent 产品”，那么这一章让我感受到的则是：
+它并不是简单把大模型接进终端，而是非常认真地把“模型获得执行权”这件事，当作一个需要长期运营和持续收缩风险边界的工程系统来设计。
