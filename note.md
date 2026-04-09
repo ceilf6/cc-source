@@ -89,6 +89,8 @@
 本蒟蒻写本文只是希望提供一些解读cc源码、窥探智能体开发的视角，还望各位大佬指点
 文中在一些地方会附上源码对应的文件名，方便有兴趣的大佬深入研究
 同时文末 “**相关链接**” 处会有一系列链接直接跳转到源码的具体位置
+如果喜欢叙事风格的可以看 [https://km.sankuai.com/collabpage/2755327017](https://km.sankuai.com/collabpage/2755327017)
+配合可视化网站食用更佳 [https://ceilf6.github.io/cc-source/](https://ceilf6.github.io/cc-source/)
 ## 一. 宏观把握
 
 先从两个角度直观简略感受一下 cc 的工程体系
